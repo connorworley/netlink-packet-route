@@ -156,8 +156,14 @@ pub enum Nla {
     NetnsId(i32),
     // custom
     OperState(State),
+    #[cfg(not(feature = "rich_nlas"))]
     Stats(Vec<u8>),
+    #[cfg(feature = "rich_nlas")]
+    Stats(Stats),
+    #[cfg(not(feature = "rich_nlas"))]
     Stats64(Vec<u8>),
+    #[cfg(feature = "rich_nlas")]
+    Stats64(Stats64),
     Map(Vec<u8>),
     // AF_SPEC (the type of af_spec depends on the interface family of the
     // message)
@@ -276,8 +282,6 @@ impl nla::Nla for Nla {
                 | Broadcast(ref bytes)
                 | PermAddress(ref bytes)
                 | AfSpecUnknown(ref bytes)
-                | Stats(ref bytes)
-                | Stats64(ref bytes)
                 | Map(ref bytes)
                 | ProtoDownReason(ref bytes)
                 => buffer.copy_from_slice(bytes.as_slice()),
@@ -328,6 +332,18 @@ impl nla::Nla for Nla {
             PropList(ref nlas) => nlas.as_slice().emit(buffer),
             AfSpecInet(ref nlas) => nlas.as_slice().emit(buffer),
             AfSpecBridge(ref nlas) => nlas.as_slice().emit(buffer),
+
+
+            #[cfg(not(feature = "rich_nlas"))]
+            Stats(ref bytes)
+                | Stats64(ref bytes)
+                => buffer.copy_from_slice(bytes.as_slice()),
+
+            #[cfg(feature = "rich_nlas")]
+            Stats(ref stats) => stats.emit(buffer),
+            #[cfg(feature = "rich_nlas")]
+            Stats64(ref stats) => stats.emit(buffer),
+
             // default nlas
             Other(ref attr) => attr.emit_value(buffer),
         }
@@ -546,8 +562,22 @@ impl<'a, T: AsRef<[u8]> + ?Sized> ParseableParametrized<NlaBuffer<&'a T>, u16>
                     .into(),
             ),
             IFLA_MAP => Map(payload.to_vec()),
+            #[cfg(not(feature = "rich_nlas"))]
             IFLA_STATS => Stats(payload.to_vec()),
+            #[cfg(feature = "rich_nlas")]
+            IFLA_STATS => {
+                let err = "invalid IFLA_STATS value";
+                let buf = StatsBuffer::new_checked(payload).context(err)?;
+                Stats(stats::Stats::parse(&buf).context(err)?)
+            },
+            #[cfg(not(feature = "rich_nlas"))]
             IFLA_STATS64 => Stats64(payload.to_vec()),
+            #[cfg(feature = "rich_nlas")]
+            IFLA_STATS64 => {
+                let err = "invalid IFLA_STATS64 value";
+                let buf = Stats64Buffer::new_checked(payload).context(err)?;
+                Stats64(stats64::Stats64::parse(&buf).context(err)?)
+            },
             IFLA_AF_SPEC => match interface_family {
                 AF_INET | AF_INET6 | AF_UNSPEC => {
                     let mut nlas = vec![];
